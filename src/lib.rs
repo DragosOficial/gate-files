@@ -42,10 +42,15 @@ pub fn create_client(s3_config: FilesS3) -> Client {
 }
 
 /// Create an AES-256-GCM cipher
-pub fn create_cipher(key: &str) -> Aes256Gcm {
-    let key = &BASE64_STANDARD.decode(key).expect("valid base64 string")[..];
-    let key: &Key<Aes256Gcm> = key.into();
-    Aes256Gcm::new(key)
+pub fn create_cipher(key: &str) -> Result<Aes256Gcm> {
+    let key = BASE64_STANDARD
+        .decode(key)
+        .map_err(|_| create_error!(InternalError))?;
+    if key.len() != 32 {
+        return Err(create_error!(InternalError));
+    }
+    let key: &Key<Aes256Gcm> = Key::<Aes256Gcm>::from_slice(&key);
+    Ok(Aes256Gcm::new(key))
 }
 
 /// Fetch a file from S3 (and decrypt it)
@@ -72,11 +77,16 @@ pub async fn fetch_from_s3(bucket_id: &str, path: &str, nonce: &str) -> Result<V
     }
 
     // Recover nonce as bytes
-    let nonce = &BASE64_STANDARD.decode(nonce).unwrap()[..];
-    let nonce: &Nonce<typenum::consts::U12> = nonce.into();
+    let nonce_bytes = BASE64_STANDARD
+        .decode(nonce)
+        .map_err(|_| create_error!(InternalError))?;
+    if nonce_bytes.len() != 12 {
+        return Err(create_error!(InternalError));
+    }
+    let nonce = Nonce::from_slice(&nonce_bytes);
 
     // Decrypt the file
-    create_cipher(&config.files.encryption_key)
+    create_cipher(&config.files.encryption_key)?
         .decrypt_in_place(nonce, b"", &mut buf)
         .map_err(|_| create_error!(InternalError))?;
 
@@ -95,7 +105,7 @@ pub async fn upload_to_s3(bucket_id: &str, path: &str, buf: &[u8]) -> Result<Str
     let mut buf = [buf, &[0; AUTHENTICATION_TAG_SIZE_BYTES]].concat();
 
     // Encrypt the file in place
-    create_cipher(&config.files.encryption_key)
+    create_cipher(&config.files.encryption_key)?
         .encrypt_in_place(&nonce, b"", &mut buf)
         .map_err(|_| create_error!(InternalError))?;
 
