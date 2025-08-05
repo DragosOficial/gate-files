@@ -4,9 +4,9 @@ use aes_gcm::{
     aead::{AeadCore, AeadMutInPlace, OsRng},
     Aes256Gcm, Key, KeyInit, Nonce,
 };
-use image::{DynamicImage, ImageBuffer};
 use gate_config::{config, report_internal_error, FilesS3};
 use gate_result::{create_error, Result};
+use image::{DynamicImage, ImageBuffer};
 
 use aws_sdk_s3::{
     config::{Credentials, Region},
@@ -19,6 +19,10 @@ use tiny_skia::Pixmap;
 
 /// Size of the authentication tag in the buffer
 pub const AUTHENTICATION_TAG_SIZE_BYTES: usize = 16;
+/// Expected Base64 length for a 256-bit encryption key (32 bytes)
+const ENCRYPTION_KEY_B64_LEN: usize = 44;
+/// Expected Base64 length for a 96-bit nonce (12 bytes)
+const NONCE_B64_LEN: usize = 16;
 
 /// Create an S3 client
 pub fn create_client(s3_config: FilesS3) -> Client {
@@ -43,6 +47,9 @@ pub fn create_client(s3_config: FilesS3) -> Client {
 
 /// Create an AES-256-GCM cipher
 pub fn create_cipher(key: &str) -> Result<Aes256Gcm> {
+    if key.len() != ENCRYPTION_KEY_B64_LEN {
+        return Err(create_error!(InternalError));
+    }
     let key = BASE64_STANDARD
         .decode(key)
         .map_err(|_| create_error!(InternalError))?;
@@ -77,6 +84,9 @@ pub async fn fetch_from_s3(bucket_id: &str, path: &str, nonce: &str) -> Result<V
     }
 
     // Recover nonce as bytes
+    if nonce.len() != NONCE_B64_LEN {
+        return Err(create_error!(InternalError));
+    }
     let nonce_bytes = BASE64_STANDARD
         .decode(nonce)
         .map_err(|_| create_error!(InternalError))?;
