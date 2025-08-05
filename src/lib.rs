@@ -24,6 +24,8 @@ pub const AUTHENTICATION_TAG_SIZE_BYTES: usize = 16;
 const ENCRYPTION_KEY_B64_LEN: usize = 44;
 /// Expected Base64 length for a 96-bit nonce (12 bytes)
 const NONCE_B64_LEN: usize = 16;
+/// Maximum allowed size for SVG images (10 MiB)
+const MAX_SVG_SIZE: usize = 10 * 1024 * 1024;
 
 /// Create an S3 client
 pub fn create_client(s3_config: FilesS3) -> Client {
@@ -247,7 +249,11 @@ pub fn decode_image<R: Read + BufRead + Seek>(reader: &mut R, mime: &str) -> Res
         "image/svg+xml" => {
             // usvg doesn't support Read trait so copy to buffer
             let mut buf = Vec::new();
-            report_internal_error!(reader.read_to_end(&mut buf))?;
+            let size =
+                report_internal_error!(reader.take(MAX_SVG_SIZE as u64).read_to_end(&mut buf))?;
+            if size == MAX_SVG_SIZE {
+                return Err(create_error!(ImageProcessingFailed));
+            }
 
             let tree = report_internal_error!(usvg::Tree::from_data(&buf, &Default::default()))?;
             let size = tree.size();
