@@ -16,6 +16,7 @@ use aws_sdk_s3::{
 use base64::prelude::*;
 use tempfile::NamedTempFile;
 use tiny_skia::Pixmap;
+use zeroize::Zeroizing;
 
 /// Size of the authentication tag in the buffer
 pub const AUTHENTICATION_TAG_SIZE_BYTES: usize = 16;
@@ -50,14 +51,19 @@ pub fn create_cipher(key: &str) -> Result<Aes256Gcm> {
     if key.len() != ENCRYPTION_KEY_B64_LEN {
         return Err(create_error!(InternalError));
     }
-    let key = BASE64_STANDARD
-        .decode(key)
-        .map_err(|_| create_error!(InternalError))?;
-    if key.len() != 32 {
-        return Err(create_error!(InternalError));
-    }
-    let key: &Key<Aes256Gcm> = Key::<Aes256Gcm>::from_slice(&key);
-    Ok(Aes256Gcm::new(key))
+    let cipher = {
+        let key = Zeroizing::new(
+            BASE64_STANDARD
+                .decode(key)
+                .map_err(|_| create_error!(InternalError))?,
+        );
+        if key.len() != 32 {
+            return Err(create_error!(InternalError));
+        }
+        let key_slice: &Key<Aes256Gcm> = Key::<Aes256Gcm>::from_slice(&key);
+        Aes256Gcm::new(key_slice)
+    };
+    Ok(cipher)
 }
 
 /// Fetch a file from S3 (and decrypt it)
