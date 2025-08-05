@@ -1,4 +1,4 @@
-use std::io::{BufRead, Read, Seek, Write};
+use std::io::{BufRead, Read, Seek};
 
 use aes_gcm::{
     aead::{AeadCore, AeadMutInPlace, OsRng},
@@ -78,13 +78,14 @@ pub async fn fetch_from_s3(bucket_id: &str, path: &str, nonce: &str) -> Result<V
         report_internal_error!(client.get_object().bucket(bucket_id).key(path).send().await)?;
 
     // Read the file from remote
-    let mut buf = vec![];
-    while let Some(bytes) = obj.body.next().await {
-        let data = report_internal_error!(bytes)?;
-        report_internal_error!(buf.write_all(&data))?;
-        // is there a more efficient way to do this?
-        // we just want the Vec<u8>
-    }
+    let data = report_internal_error!(obj.body.collect().await)?;
+    let mut buf = if let Some(len) = obj.content_length() {
+        let mut buf = Vec::with_capacity(len as usize);
+        buf.extend_from_slice(&data.into_bytes());
+        buf
+    } else {
+        data.into_bytes().to_vec()
+    };
 
     // File is not encrypted
     if nonce.is_empty() {
